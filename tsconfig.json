@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",                    // Código JS gerado
+    "module": "CommonJS",                  // Módulos para Node
+    "outDir": "./dist",                    // Pasta compilada
+    "rootDir": "./src",                    // Pasta com código fonte
+    "strict": true,                        // Ativa checagem rígida de tipos
+    "esModuleInterop": true,               // Para import default de libs CJS
+    "allowSyntheticDefaultImports": true, // Permite import sintético
+    "skipLibCheck": true,                  // Ignora checagem de libs para acelerar build
+    "forceConsistentCasingInFileNames": true  // Padroniza maiúsculas/minúsculas
+  },
+  "include": ["src/**/*"]
+}
