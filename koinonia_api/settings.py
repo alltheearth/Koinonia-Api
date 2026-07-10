@@ -117,3 +117,15 @@ GOOGLE_REDIRECT_URI = config(
     default="http://localhost:8000/api/integrations/google/callback/",
 )
 GOOGLE_CALENDAR_SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# Fila assíncrona (sincronização com o Google Calendar roda em background).
+# Sem CELERY_BROKER_URL configurado (ex: dev local sem Redis), as tasks rodam
+# de forma síncrona no próprio processo, então nada quebra sem infraestrutura extra.
+CELERY_BROKER_URL = config("CELERY_BROKER_URL", default="")
+CELERY_RESULT_BACKEND = config("CELERY_RESULT_BACKEND", default=CELERY_BROKER_URL)
+CELERY_TASK_ALWAYS_EAGER = config(
+    "CELERY_TASK_ALWAYS_EAGER", default=not CELERY_BROKER_URL, cast=bool
+)
+CELERY_TASK_EAGER_PROPAGATES = True
+CELERY_TASK_ACKS_LATE = True
+CELERY_TIMEZONE = TIME_ZONE
