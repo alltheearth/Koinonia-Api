@@ -1,75 +1,31 @@
 # Koinonia API
 
-API REST da Koinonia, construída com **Django + Django REST Framework**, com
-sincronização de agenda por usuário com o **Google Calendar**.
+API em Django + Django REST Framework do Koinonia: contatos, integrações (uazapi/OpenAI por usuário) e chat de WhatsApp.
 
-## Stack
+## Setup local
 
-- Django 5 / Django REST Framework
-- JWT (djangorestframework-simplejwt)
-- PostgreSQL (via `DATABASE_URL`)
-- Google Calendar API (OAuth2 por usuário)
-
-## Apps
-
-- `accounts` — usuário customizado, registro e autenticação JWT.
-- `contacts` — cadastro de contatos (`/api/contatos/`).
-- `history` — histórico semanal de contato (`/api/history/`).
-- `agenda` — compromissos (`/api/agenda/`), sincronizados com o Google Calendar.
-- `integrations` — conexão OAuth2 do Google Calendar por usuário (`/api/integrations/google/`).
-
-## Rodando localmente
-
-```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-cp .env.example .env
-# edite o .env com suas credenciais
-
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
-```
-
-## Autenticação
-
-```
-POST /api/auth/register/   { username, email, password }
-POST /api/auth/token/      { username, password } -> { access, refresh }
-POST /api/auth/token/refresh/
-GET  /api/auth/me/         (Authorization: Bearer <access>)
-```
-
-Todos os endpoints de `contatos`, `history` e `agenda` exigem o header
-`Authorization: Bearer <access>` e retornam apenas os dados do usuário logado.
-
-## Conectando o Google Calendar (por usuário)
-
-1. Crie um projeto e credenciais OAuth2 "Web application" no
-   [Google Cloud Console](https://console.cloud.google.com/apis/credentials),
-   habilitando a Google Calendar API.
-2. Configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` e `GOOGLE_REDIRECT_URI`
-   no `.env` (a URI de redirecionamento deve estar cadastrada no console do Google).
-3. Fluxo de conexão, do frontend:
-
+1. Crie um projeto no [Supabase](https://supabase.com) e pegue os dados de conexão em **Project Settings > Database**.
+2. Copie `.env.example` para `.env` e preencha:
+   - `SECRET_KEY`: `poetry run python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"`
+   - `FERNET_KEY`: `poetry run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
+   - `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT`: do Supabase.
+3. Instale as dependências e rode as migrations:
    ```
-   GET  /api/integrations/google/connect/     -> { authorization_url }
+   poetry install
+   poetry run python manage.py migrate
+   poetry run python manage.py createsuperuser
+   ```
+4. Suba o servidor (porta 8000 costuma já estar ocupada por outro processo neste PC — usamos 8001):
+   ```
+   poetry run python manage.py runserver 8001
    ```
 
-   Redirecione o usuário para `authorization_url`. Após o consentimento, o
-   Google chama `GET /api/integrations/google/callback/`, que salva as
-   credenciais do usuário e redireciona de volta para
-   `FRONTEND_URL/configuracoes?google=connected` (ou `...&google=error`).
+As credenciais do **uazapi** e da **OpenAI** não ficam no `.env` — cada usuário cadastra as suas na tela de Integrações depois de criar a conta e logar no app.
 
-   ```
-   GET  /api/integrations/google/status/      -> { connected, calendar_id, connected_at }
-   POST /api/integrations/google/disconnect/
-   ```
+## Principais endpoints
 
-Depois de conectado, todo compromisso criado, atualizado ou removido em
-`/api/agenda/` é automaticamente refletido no Google Calendar do usuário
-(evento vinculado via `google_event_id`). Se o usuário não conectou o
-Google Calendar, os compromissos continuam funcionando normalmente, apenas
-sem sincronização.
+- `POST /api/v1/auth/register/`, `POST /api/v1/auth/login/`, `POST /api/v1/auth/refresh/`, `GET /api/v1/auth/me/`
+- `GET/PUT /api/v1/integrations/`, `GET /api/v1/integrations/whatsapp/status/`, `POST /api/v1/integrations/whatsapp/connect/`
+- `GET/POST /api/v1/contacts/`, `GET/PATCH/DELETE /api/v1/contacts/{id}/`, `POST /api/v1/contacts/{id}/verify/`
+- `GET/POST /api/v1/contacts/{id}/messages/`
+- Docs: `GET /api/v1/docs/`

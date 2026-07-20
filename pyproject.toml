@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "koinonia-api"
+version = "0.1.0"
+description = "API do Koinonia: contatos, integrações (uazapi/OpenAI) e chat de WhatsApp"
+authors = []
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+django = "^5.2.7"
+djangorestframework = "^3.16.1"
+djangorestframework-simplejwt = "^5.3"
+djangorestframework-camel-case = "^1.4.2"
+django-cors-headers = "^4.9.0"
+python-decouple = "^3.8"
+psycopg2-binary = "^2.9.11"
+httpx = "^0.28.1"
+cryptography = ">=41.0"
+drf-spectacular = "^0.29.0"
+
+[tool.poetry.group.dev.dependencies]
+ipython = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,8 +1,7 @@
-__pycache__/
-*.py[cod]
-*.sqlite3
 .env
+__pycache__/
+*.pyc
 .venv/
 venv/
 staticfiles/
-*.log
+db.sqlite3
