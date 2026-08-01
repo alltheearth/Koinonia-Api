@@ -19,6 +19,7 @@ urlpatterns = [
         path('', include('apps.contacts.urls')),
         path('', include('apps.whatsapp.urls')),
         path('agenda/', include('apps.agenda.urls')),
+        path('', include('apps.scheduled_messages.urls')),
         path('schema/', SpectacularAPIView.as_view(), name='schema'),
         path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     ])),

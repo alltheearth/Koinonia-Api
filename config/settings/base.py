@@ -1,6 +1,7 @@
 from datetime import timedelta
 from pathlib import Path
 
+from celery.schedules import crontab
 from decouple import config
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -21,12 +22,14 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'drf_spectacular',
+    'django_celery_results',
 
     'apps.users',
     'apps.integrations',
     'apps.contacts',
     'apps.whatsapp',
     'apps.agenda',
+    'apps.scheduled_messages',
 ]
 
 MIDDLEWARE = [
@@ -151,3 +154,21 @@ FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5180')
 # ------------------------------------------------------------------
 
 FERNET_KEY = config('FERNET_KEY')
+
+# ------------------------------------------------------------------
+# Celery / Redis (envio agendado de mensagens)
+# ------------------------------------------------------------------
+
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+CELERY_BROKER_URL = REDIS_URL
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 5 * 60
+CELERY_BEAT_SCHEDULE = {
+    'dispatch-due-scheduled-messages': {
+        'task': 'apps.scheduled_messages.tasks.dispatch_due_scheduled_messages',
+        'schedule': crontab(minute='*/1'),
+    },
+}

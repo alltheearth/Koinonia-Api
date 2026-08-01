@@ -5,3 +5,6 @@ __pycache__/
 venv/
 staticfiles/
 db.sqlite3
+media/
+celerybeat-schedule*
+dump.rdb

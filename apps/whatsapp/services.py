@@ -47,3 +47,32 @@ def send_audio(base_url: str, token: str, phone: str, file_data_uri: str) -> dic
     )
     res.raise_for_status()
     return res.json()
+
+
+def _media_type_for(mime_type: str) -> str:
+    if mime_type.startswith('image/'):
+        return 'image'
+    if mime_type.startswith('video/'):
+        return 'video'
+    return 'document'
+
+
+def send_media(
+    base_url: str, token: str, phone: str, file_data_uri: str, mime_type: str = '', filename: str = ''
+) -> dict:
+    """Envia imagem/vídeo/documento (mídia genérica, diferente do áudio/ptt de send_audio)."""
+    payload = {
+        'number': normalize_phone(phone),
+        'type': _media_type_for(mime_type or ''),
+        'file': file_data_uri,
+    }
+    if filename:
+        payload['docName'] = filename
+    res = httpx.post(
+        f'{base_url}/send/media',
+        json=payload,
+        headers={'token': token},
+        timeout=30.0,
+    )
+    res.raise_for_status()
+    return res.json()

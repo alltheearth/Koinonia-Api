@@ -67,3 +67,21 @@ class Contact(models.Model):
 
     def __str__(self):
         return self.nome
+
+
+class ContactGroup(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='contact_groups'
+    )
+    nome = models.CharField(max_length=255)
+    descricao = models.TextField(blank=True, default='')
+    contacts = models.ManyToManyField(Contact, related_name='groups', blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-atualizado_em']
+
+    def __str__(self):
+        return self.nome
