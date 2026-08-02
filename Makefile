@@ -1,0 +1,67 @@
+.PHONY: help build up down logs migrate secrets deploy rm-stack ps
+
+ENV_FILE ?= .env.docker
+
+help:
+	@echo "make build     - builda as imagens koinonia-api (este repo) e shepherds-toolkit-api"
+	@echo "make up        - sobe tudo localmente via docker compose (usa $(ENV_FILE))"
+	@echo "make down      - derruba o docker compose local"
+	@echo "make logs      - segue os logs do docker compose local"
+	@echo "make migrate   - roda as migrations nos dois backends (compose local)"
+	@echo "make secrets   - cria/atualiza os Docker secrets no Swarm a partir de $(ENV_FILE)"
+	@echo "make deploy    - builda as imagens e sobe o swarm-stack.yml (VPS)"
+	@echo "make rm-stack  - remove o stack do Swarm"
+	@echo "make ps        - lista os servicos do stack"
+
+build:
+	docker build -t koinonia-api:latest .
+	docker build -t shepherds-toolkit-api:latest ../shepherds-toolkit-api
+
+up:
+	docker compose --env-file $(ENV_FILE) up -d --build
+
+down:
+	docker compose --env-file $(ENV_FILE) down
+
+logs:
+	docker compose --env-file $(ENV_FILE) logs -f
+
+migrate:
+	docker compose --env-file $(ENV_FILE) exec koinonia-api python manage.py migrate --noinput
+	docker compose --env-file $(ENV_FILE) exec shepherds-toolkit-api python manage.py migrate --noinput
+
+# Docker secrets nao sao atualizaveis in-place: remove (se existir) e recria.
+# Rode de novo depois de trocar um valor no ENV_FILE.
+secrets:
+	set -a; . ./$(ENV_FILE); set +a; \
+	create_secret() { \
+		name=$$1; value=$$2; \
+		if [ -z "$$value" ]; then echo "  (pulando $$name - vazio no $(ENV_FILE))"; return; fi; \
+		docker secret rm $$name >/dev/null 2>&1 || true; \
+		printf '%s' "$$value" | docker secret create $$name - >/dev/null && echo "  OK $$name"; \
+	}; \
+	echo "Criando Docker secrets a partir de $(ENV_FILE)..."; \
+	create_secret koinonia_secret_key "$$KOINONIA_SECRET_KEY"; \
+	create_secret koinonia_db_password "$$KOINONIA_DB_PASSWORD"; \
+	create_secret koinonia_fernet_key "$$KOINONIA_FERNET_KEY"; \
+	create_secret koinonia_google_client_secret "$$KOINONIA_GOOGLE_CLIENT_SECRET"; \
+	create_secret koinonia_client_secret "$$KOINONIA_CLIENT_SECRET"; \
+	create_secret st_secret_key "$$ST_SECRET_KEY"; \
+	create_secret st_db_password "$$ST_DB_PASSWORD"; \
+	create_secret st_field_encryption_key "$$ST_FIELD_ENCRYPTION_KEY"; \
+	create_secret st_auth0_client_secret "$$ST_AUTH0_CLIENT_SECRET"; \
+	create_secret st_auth0_mgmt_client_secret "$$ST_AUTH0_MGMT_CLIENT_SECRET"; \
+	create_secret st_google_client_secret "$$ST_GOOGLE_CLIENT_SECRET"; \
+	create_secret st_openai_api_key "$$ST_OPENAI_API_KEY"; \
+	create_secret st_stripe_secret_key "$$ST_STRIPE_SECRET_KEY"; \
+	create_secret st_stripe_webhook_secret "$$ST_STRIPE_WEBHOOK_SECRET"
+
+deploy: build
+	set -a; . ./$(ENV_FILE); set +a; \
+	docker stack deploy -c swarm-stack.yml koinonia --with-registry-auth
+
+rm-stack:
+	docker stack rm koinonia
+
+ps:
+	docker stack services koinonia
