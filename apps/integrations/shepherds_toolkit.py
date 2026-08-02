@@ -3,7 +3,7 @@ import httpx
 
 def exchange_code(base_url: str, client_secret: str, code: str) -> dict:
     res = httpx.post(
-        f'{base_url}/api/integrations/koinonia/token/',
+        f'{base_url}/api/v1/integrations/koinonia/token/',
         json={'code': code, 'client_secret': client_secret},
         timeout=10.0,
     )
@@ -13,7 +13,7 @@ def exchange_code(base_url: str, client_secret: str, code: str) -> dict:
 
 def get_upcoming_events(base_url: str, token: str) -> list:
     res = httpx.get(
-        f'{base_url}/api/events/upcoming/',
+        f'{base_url}/api/v1/events/upcoming/',
         headers={'Authorization': f'Token {token}'},
         timeout=10.0,
     )
@@ -23,7 +23,7 @@ def get_upcoming_events(base_url: str, token: str) -> list:
 
 def get_recent_writings(base_url: str, token: str) -> list:
     res = httpx.get(
-        f'{base_url}/api/writings/recent/',
+        f'{base_url}/api/v1/writings/recent/',
         headers={'Authorization': f'Token {token}'},
         timeout=10.0,
     )
