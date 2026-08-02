@@ -9,6 +9,7 @@ class UserIntegrationSerializer(serializers.ModelSerializer):
     uazapi_configured = serializers.BooleanField(read_only=True)
     openai_configured = serializers.BooleanField(read_only=True)
     google_configured = serializers.BooleanField(read_only=True)
+    shepherds_toolkit_configured = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = UserIntegration
@@ -16,5 +17,9 @@ class UserIntegrationSerializer(serializers.ModelSerializer):
             'uazapi_base_url', 'uazapi_token', 'uazapi_configured',
             'openai_api_key', 'openai_configured', 'whatsapp_connected_at',
             'google_configured', 'google_email', 'google_connected_at',
+            'shepherds_toolkit_configured', 'shepherds_toolkit_email', 'shepherds_toolkit_connected_at',
         ]
-        read_only_fields = ['whatsapp_connected_at', 'google_email', 'google_connected_at']
+        read_only_fields = [
+            'whatsapp_connected_at', 'google_email', 'google_connected_at',
+            'shepherds_toolkit_email', 'shepherds_toolkit_connected_at',
+        ]

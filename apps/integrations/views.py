@@ -1,4 +1,5 @@
 from datetime import timedelta
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -10,11 +11,12 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import google_calendar, services
+from . import google_calendar, services, shepherds_toolkit
 from .models import UserIntegration
 from .serializers import UserIntegrationSerializer
 
 GOOGLE_STATE_SALT = 'google-oauth-state'
+SHEPHERDS_TOOLKIT_STATE_SALT = 'shepherds-toolkit-oauth-state'
 
 
 class UserIntegrationView(generics.RetrieveUpdateAPIView):
@@ -157,3 +159,113 @@ class GoogleCallbackView(APIView):
         integration.save()
 
         return redirect(f'{settings.FRONTEND_URL}/integracoes?google=connected')
+
+
+class ShepherdsToolkitStatusView(APIView):
+    def get(self, request):
+        integration, _ = UserIntegration.objects.get_or_create(user=request.user)
+        return Response({
+            'connected': integration.shepherds_toolkit_configured,
+            'email': integration.shepherds_toolkit_email,
+            'connected_at': integration.shepherds_toolkit_connected_at,
+        })
+
+
+class ShepherdsToolkitConnectView(APIView):
+    """Inicia o mini-OAuth interno: o login e o consentimento acontecem no
+    shepherds-toolkit-app (nunca dentro do koinonia-app)."""
+
+    def get(self, request):
+        if not settings.KOINONIA_CLIENT_SECRET:
+            return Response(
+                {'detail': 'Integração com Shepherd\'s Toolkit não configurada no servidor.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        state = signing.dumps(request.user.id, salt=SHEPHERDS_TOOLKIT_STATE_SALT)
+        query = urlencode({'state': state, 'redirect_uri': settings.SHEPHERDS_TOOLKIT_CALLBACK_URL})
+        return Response({'url': f'{settings.SHEPHERDS_TOOLKIT_APP_URL}/connect/koinonia?{query}'})
+
+
+class ShepherdsToolkitDisconnectView(APIView):
+    def post(self, request):
+        integration, _ = UserIntegration.objects.get_or_create(user=request.user)
+        integration.shepherds_toolkit_token_encrypted = ''
+        integration.shepherds_toolkit_email = ''
+        integration.shepherds_toolkit_connected_at = None
+        integration.save()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ShepherdsToolkitCallbackView(APIView):
+    """O shepherds-toolkit-app redireciona o navegador direto pra cá (depois
+    do usuário aprovar o vínculo lá), com um código de uso único. Aqui a
+    gente troca esse código pelo token de acesso, servidor-a-servidor."""
+
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        code = request.query_params.get('code')
+        state = request.query_params.get('state')
+        if not code or not state:
+            return redirect(f'{settings.FRONTEND_URL}/integracoes?shepherds_toolkit=error')
+
+        try:
+            user_id = signing.loads(state, salt=SHEPHERDS_TOOLKIT_STATE_SALT, max_age=600)
+        except signing.BadSignature:
+            return redirect(f'{settings.FRONTEND_URL}/integracoes?shepherds_toolkit=error')
+
+        try:
+            tokens = shepherds_toolkit.exchange_code(
+                settings.SHEPHERDS_TOOLKIT_API_URL, settings.KOINONIA_CLIENT_SECRET, code
+            )
+        except Exception:
+            return redirect(f'{settings.FRONTEND_URL}/integracoes?shepherds_toolkit=error')
+
+        user = get_user_model().objects.get(id=user_id)
+        integration, _ = UserIntegration.objects.get_or_create(user=user)
+        integration.shepherds_toolkit_token = tokens['access_token']
+        integration.shepherds_toolkit_email = tokens.get('email', '')
+        integration.shepherds_toolkit_connected_at = timezone.now()
+        integration.save()
+
+        return redirect(f'{settings.FRONTEND_URL}/integracoes?shepherds_toolkit=connected')
+
+
+class ShepherdsToolkitCalendarView(APIView):
+    def get(self, request):
+        integration, _ = UserIntegration.objects.get_or_create(user=request.user)
+        if not integration.shepherds_toolkit_configured:
+            return Response(
+                {'detail': 'Shepherd\'s Toolkit não conectado.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            events = shepherds_toolkit.get_upcoming_events(
+                settings.SHEPHERDS_TOOLKIT_API_URL, integration.shepherds_toolkit_token
+            )
+        except Exception:
+            return Response(
+                {'detail': 'Não foi possível buscar a agenda do Shepherd\'s Toolkit.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(events)
+
+
+class ShepherdsToolkitWritingsView(APIView):
+    def get(self, request):
+        integration, _ = UserIntegration.objects.get_or_create(user=request.user)
+        if not integration.shepherds_toolkit_configured:
+            return Response(
+                {'detail': 'Shepherd\'s Toolkit não conectado.'}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            writings = shepherds_toolkit.get_recent_writings(
+                settings.SHEPHERDS_TOOLKIT_API_URL, integration.shepherds_toolkit_token
+            )
+        except Exception:
+            return Response(
+                {'detail': 'Não foi possível buscar os escritos do Shepherd\'s Toolkit.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(writings)

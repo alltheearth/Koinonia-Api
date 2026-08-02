@@ -19,6 +19,10 @@ class UserIntegration(models.Model):
     google_email = models.CharField(max_length=255, blank=True, default='')
     google_connected_at = models.DateTimeField(null=True, blank=True)
 
+    shepherds_toolkit_token_encrypted = models.CharField(max_length=500, blank=True, default='')
+    shepherds_toolkit_email = models.CharField(max_length=255, blank=True, default='')
+    shepherds_toolkit_connected_at = models.DateTimeField(null=True, blank=True)
+
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
@@ -65,6 +69,18 @@ class UserIntegration(models.Model):
     @property
     def google_configured(self) -> bool:
         return bool(self.google_refresh_token_encrypted)
+
+    @property
+    def shepherds_toolkit_token(self) -> str:
+        return decrypt(self.shepherds_toolkit_token_encrypted)
+
+    @shepherds_toolkit_token.setter
+    def shepherds_toolkit_token(self, value: str):
+        self.shepherds_toolkit_token_encrypted = encrypt(value)
+
+    @property
+    def shepherds_toolkit_configured(self) -> bool:
+        return bool(self.shepherds_toolkit_token_encrypted)
 
     def __str__(self):
         return f'Integração de {self.user}'
