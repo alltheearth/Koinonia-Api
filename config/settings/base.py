@@ -150,6 +150,18 @@ GOOGLE_REDIRECT_URI = config(
 FRONTEND_URL = config('FRONTEND_URL', default='http://localhost:5180')
 
 # ------------------------------------------------------------------
+# Shepherd's Toolkit (mini-OAuth interno: koinonia-app consome Calendar e
+# Writings de uma conta vinculada do shepherds-toolkit)
+# ------------------------------------------------------------------
+SHEPHERDS_TOOLKIT_API_URL = config('SHEPHERDS_TOOLKIT_API_URL', default='http://localhost:8000')
+SHEPHERDS_TOOLKIT_APP_URL = config('SHEPHERDS_TOOLKIT_APP_URL', default='http://localhost:5173')
+SHEPHERDS_TOOLKIT_CALLBACK_URL = config(
+    'SHEPHERDS_TOOLKIT_CALLBACK_URL',
+    default='http://localhost:8001/api/v1/integrations/shepherds-toolkit/callback/',
+)
+KOINONIA_CLIENT_SECRET = config('KOINONIA_CLIENT_SECRET', default='')
+
+# ------------------------------------------------------------------
 # Criptografia de credenciais (uazapi token / OpenAI key)
 # ------------------------------------------------------------------
 
