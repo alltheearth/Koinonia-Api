@@ -65,6 +65,10 @@ secrets:
 deploy: build
 	set -a; . ./$(ENV_FILE); set +a; \
 	docker stack deploy -c swarm-stack.yml koinonia --with-registry-auth
+	@echo "Forcando update dos servicos com imagem local (sem registry, o Swarm nao detecta mudanca de conteudo sozinho)..."
+	docker service update --force --quiet koinonia_koinonia-api
+	docker service update --force --quiet koinonia_koinonia-celery
+	docker service update --force --quiet koinonia_shepherds-toolkit-api
 
 rm-stack:
 	docker stack rm koinonia
@@ -104,6 +108,10 @@ secrets-test:
 deploy-test: build
 	set -a; . ./$(TEST_ENV_FILE); set +a; \
 	docker stack deploy -c swarm-stack.test.yml koinonia-test --with-registry-auth
+	@echo "Forcando update dos servicos com imagem local (sem registry, o Swarm nao detecta mudanca de conteudo sozinho)..."
+	docker service update --force --quiet koinonia-test_koinonia-api
+	docker service update --force --quiet koinonia-test_koinonia-celery
+	docker service update --force --quiet koinonia-test_shepherds-toolkit-api
 
 rm-stack-test:
 	docker stack rm koinonia-test
