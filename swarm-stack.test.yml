@@ -1,0 +1,230 @@
+version: '3.8'
+
+# Deploy de TESTE (notebook usado como servidor de teste, acessado via SSH)
+# — mesma topologia do swarm-stack.yml de produção, mas:
+#   - koinonia-db local (Postgres em container) em vez de Supabase, pra não
+#     tocar em dados reais durante os testes;
+#   - DEBUG=True nas duas APIs, pra facilitar debug;
+#   - secrets com prefixo test_ (`docker secret ls`), pra não colidir com
+#     os de produção caso um dia rodem no mesmo Swarm.
+#
+# Suba as imagens (`make build`), crie os secrets de teste
+# (`make secrets-test`) e então `make deploy-test`. Acesse via
+# `ssh -L 8001:localhost:8001 -L 8002:localhost:8002 usuario@notebook`
+# ou direto pelo IP da rede local, dependendo de como você acessa.
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+  koinonia-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${KOINONIA_DB_NAME:-koinonia}
+      POSTGRES_USER: ${KOINONIA_DB_USER:-postgres}
+      POSTGRES_PASSWORD_FILE: /run/secrets/koinonia_db_password
+    secrets:
+      - koinonia_db_password
+    volumes:
+      - koinonia_db_data:/var/lib/postgresql/data
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+  st-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${ST_DB_NAME:-shepherd_toolkit}
+      POSTGRES_USER: ${ST_DB_USER:-postgres}
+      POSTGRES_PASSWORD_FILE: /run/secrets/st_db_password
+    secrets:
+      - st_db_password
+    volumes:
+      - st_db_data:/var/lib/postgresql/data
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+  koinonia-api:
+    image: koinonia-api:${TAG:-latest}
+    command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2"]
+    environment:
+      DEBUG: "True"
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS:-*}
+      DB_NAME: ${KOINONIA_DB_NAME:-koinonia}
+      DB_USER: ${KOINONIA_DB_USER:-postgres}
+      DB_HOST: koinonia-db
+      DB_PORT: 5432
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5190,http://localhost:5174}
+      FRONTEND_URL: ${KOINONIA_FRONTEND_URL:-http://localhost:5190}
+      GOOGLE_CLIENT_ID: ${KOINONIA_GOOGLE_CLIENT_ID}
+      GOOGLE_REDIRECT_URI: ${KOINONIA_GOOGLE_REDIRECT_URI}
+      SHEPHERDS_TOOLKIT_API_URL: ${SHEPHERDS_TOOLKIT_API_URL:-http://shepherds-toolkit-api:8000}
+      SHEPHERDS_TOOLKIT_APP_URL: ${SHEPHERDS_TOOLKIT_APP_URL:-http://localhost:5174}
+      SHEPHERDS_TOOLKIT_CALLBACK_URL: ${KOINONIA_API_URL:-http://localhost:8001}/api/v1/integrations/shepherds-toolkit/callback/
+      REDIS_URL: redis://redis:6379/0
+    secrets:
+      - source: koinonia_secret_key
+        target: secret_key
+      - source: koinonia_db_password
+        target: db_password
+      - source: koinonia_fernet_key
+        target: fernet_key
+      - source: koinonia_google_client_secret
+        target: google_client_secret
+      - source: koinonia_client_secret
+        target: koinonia_client_secret
+    depends_on:
+      - koinonia-db
+    ports:
+      - "8001:8000"
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+  koinonia-celery:
+    image: koinonia-api:${TAG:-latest}
+    command: ["celery", "-A", "config", "worker", "-l", "info"]
+    environment:
+      DEBUG: "True"
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS:-*}
+      DB_NAME: ${KOINONIA_DB_NAME:-koinonia}
+      DB_USER: ${KOINONIA_DB_USER:-postgres}
+      DB_HOST: koinonia-db
+      DB_PORT: 5432
+      REDIS_URL: redis://redis:6379/0
+    secrets:
+      - source: koinonia_secret_key
+        target: secret_key
+      - source: koinonia_db_password
+        target: db_password
+      - source: koinonia_fernet_key
+        target: fernet_key
+    depends_on:
+      - redis
+      - koinonia-db
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+  shepherds-toolkit-api:
+    image: shepherds-toolkit-api:${TAG:-latest}
+    command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2"]
+    environment:
+      DEBUG: "True"
+      ALLOWED_HOSTS: ${ST_ALLOWED_HOSTS:-*}
+      DJANGO_SETTINGS_MODULE: config.settings
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${ST_DB_NAME:-shepherd_toolkit}
+      DB_USER: ${ST_DB_USER:-postgres}
+      DB_HOST: st-db
+      DB_PORT: 5432
+      EXTRA_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5190,http://localhost:5174}
+      FRONTEND_URL: ${SHEPHERDS_TOOLKIT_APP_URL:-http://localhost:5174}
+      AUTH0_DOMAIN: ${ST_AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${ST_AUTH0_CLIENT_ID}
+      AUTH0_MGMT_CLIENT_ID: ${ST_AUTH0_MGMT_CLIENT_ID}
+      GOOGLE_CLIENT_ID: ${ST_GOOGLE_CLIENT_ID}
+      GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar.events
+      STRIPE_PRICE_ID_PRO: ${ST_STRIPE_PRICE_ID_PRO}
+    secrets:
+      - source: st_secret_key
+        target: secret_key
+      - source: st_db_password
+        target: db_password
+      - source: st_field_encryption_key
+        target: field_encryption_key
+      - source: st_auth0_client_secret
+        target: auth0_client_secret
+      - source: st_auth0_mgmt_client_secret
+        target: auth0_mgmt_client_secret
+      - source: st_google_client_secret
+        target: google_client_secret
+      - source: st_openai_api_key
+        target: openai_api_key
+      - source: st_stripe_secret_key
+        target: stripe_secret_key
+      - source: st_stripe_webhook_secret
+        target: stripe_webhook_secret
+      - source: koinonia_client_secret
+        target: koinonia_client_secret
+    depends_on:
+      - st-db
+    ports:
+      - "8002:8000"
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
+networks:
+  koinonia-net:
+    driver: overlay
+
+volumes:
+  koinonia_db_data:
+  st_db_data:
+  redis_data:
+
+# Nomes de secret com prefixo test_ pra não colidir com os de produção
+# (secrets são globais no Swarm, não escopados por stack — ao contrário de
+# volumes/networks, que já ganham o nome do stack automaticamente).
+secrets:
+  koinonia_secret_key:
+    external: true
+    name: test_koinonia_secret_key
+  koinonia_db_password:
+    external: true
+    name: test_koinonia_db_password
+  koinonia_fernet_key:
+    external: true
+    name: test_koinonia_fernet_key
+  koinonia_google_client_secret:
+    external: true
+    name: test_koinonia_google_client_secret
+  koinonia_client_secret:
+    external: true
+    name: test_koinonia_client_secret
+  st_secret_key:
+    external: true
+    name: test_st_secret_key
+  st_db_password:
+    external: true
+    name: test_st_db_password
+  st_field_encryption_key:
+    external: true
+    name: test_st_field_encryption_key
+  st_auth0_client_secret:
+    external: true
+    name: test_st_auth0_client_secret
+  st_auth0_mgmt_client_secret:
+    external: true
+    name: test_st_auth0_mgmt_client_secret
+  st_google_client_secret:
+    external: true
+    name: test_st_google_client_secret
+  st_openai_api_key:
+    external: true
+    name: test_st_openai_api_key
+  st_stripe_secret_key:
+    external: true
+    name: test_st_stripe_secret_key
+  st_stripe_webhook_secret:
+    external: true
+    name: test_st_stripe_webhook_secret
