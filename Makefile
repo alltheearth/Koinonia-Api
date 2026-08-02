@@ -42,7 +42,7 @@ secrets:
 	create_secret() { \
 		name=$$1; value=$$2; \
 		docker secret rm $$name >/dev/null 2>&1 || true; \
-		printf '%s' "$$value" | docker secret create $$name - >/dev/null && { \
+		printf '%s\n' "$$value" | docker secret create $$name - >/dev/null && { \
 			if [ -z "$$value" ]; then echo "  OK $$name (vazio)"; else echo "  OK $$name"; fi; \
 		}; \
 	}; \
@@ -81,7 +81,7 @@ secrets-test:
 	create_secret() { \
 		name=$$1; value=$$2; \
 		docker secret rm $$name >/dev/null 2>&1 || true; \
-		printf '%s' "$$value" | docker secret create $$name - >/dev/null && { \
+		printf '%s\n' "$$value" | docker secret create $$name - >/dev/null && { \
 			if [ -z "$$value" ]; then echo "  OK $$name (vazio)"; else echo "  OK $$name"; fi; \
 		}; \
 	}; \
