@@ -1,0 +1,126 @@
+version: '3.8'
+
+# Dev local — equivalente ao swarm-stack.yml, mas lendo as credenciais
+# direto de .env.docker (não confundir com o .env do `manage.py runserver`
+# direto, que usa outro formato de variáveis) em vez de Docker secrets.
+# Suba com `make up` (que já passa --env-file .env.docker), não com
+# `docker compose up` puro. Não use isto em produção; para VPS use
+# `make deploy` (swarm-stack.yml). Espera o repo irmão shepherds-toolkit-api
+# em ../shepherds-toolkit-api.
+
+services:
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    networks:
+      - koinonia-net
+
+  st-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${ST_DB_NAME:-shepherd_toolkit}
+      POSTGRES_USER: ${ST_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${ST_DB_PASSWORD:-postgres}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ST_DB_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - st_db_data:/var/lib/postgresql/data
+    networks:
+      - koinonia-net
+
+  koinonia-api:
+    build: .
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: ${KOINONIA_SECRET_KEY}
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DB_NAME: ${KOINONIA_DB_NAME}
+      DB_USER: ${KOINONIA_DB_USER}
+      DB_PASSWORD: ${KOINONIA_DB_PASSWORD}
+      DB_HOST: ${KOINONIA_DB_HOST}
+      DB_PORT: ${KOINONIA_DB_PORT:-5432}
+      FERNET_KEY: ${KOINONIA_FERNET_KEY}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5190}
+      FRONTEND_URL: ${KOINONIA_FRONTEND_URL:-http://localhost:5190}
+      GOOGLE_CLIENT_ID: ${KOINONIA_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${KOINONIA_GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${KOINONIA_GOOGLE_REDIRECT_URI}
+      SHEPHERDS_TOOLKIT_API_URL: http://shepherds-toolkit-api:8000
+      SHEPHERDS_TOOLKIT_APP_URL: ${SHEPHERDS_TOOLKIT_APP_URL:-http://localhost:5174}
+      SHEPHERDS_TOOLKIT_CALLBACK_URL: http://localhost:8001/api/v1/integrations/shepherds-toolkit/callback/
+      KOINONIA_CLIENT_SECRET: ${KOINONIA_CLIENT_SECRET}
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8001:8000"
+    depends_on:
+      - redis
+    networks:
+      - koinonia-net
+
+  koinonia-celery:
+    build: .
+    command: celery -A config worker -l info --pool=solo
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: ${KOINONIA_SECRET_KEY}
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DB_NAME: ${KOINONIA_DB_NAME}
+      DB_USER: ${KOINONIA_DB_USER}
+      DB_PASSWORD: ${KOINONIA_DB_PASSWORD}
+      DB_HOST: ${KOINONIA_DB_HOST}
+      DB_PORT: ${KOINONIA_DB_PORT:-5432}
+      FERNET_KEY: ${KOINONIA_FERNET_KEY}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - koinonia-net
+
+  shepherds-toolkit-api:
+    build: ../shepherds-toolkit-api
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: ${ST_SECRET_KEY}
+      ALLOWED_HOSTS: ${ST_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DJANGO_SETTINGS_MODULE: config.settings
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${ST_DB_NAME:-shepherd_toolkit}
+      DB_USER: ${ST_DB_USER:-postgres}
+      DB_PASSWORD: ${ST_DB_PASSWORD:-postgres}
+      DB_HOST: st-db
+      DB_PORT: 5432
+      EXTRA_CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5190}
+      FRONTEND_URL: ${SHEPHERDS_TOOLKIT_APP_URL:-http://localhost:5174}
+      AUTH0_DOMAIN: ${ST_AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${ST_AUTH0_CLIENT_ID}
+      AUTH0_CLIENT_SECRET: ${ST_AUTH0_CLIENT_SECRET}
+      AUTH0_MGMT_CLIENT_ID: ${ST_AUTH0_MGMT_CLIENT_ID}
+      AUTH0_MGMT_CLIENT_SECRET: ${ST_AUTH0_MGMT_CLIENT_SECRET}
+      GOOGLE_CLIENT_ID: ${ST_GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${ST_GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALENDAR_SCOPE: https://www.googleapis.com/auth/calendar.events
+      FIELD_ENCRYPTION_KEY: ${ST_FIELD_ENCRYPTION_KEY}
+      OPENAI_API_KEY: ${ST_OPENAI_API_KEY}
+      STRIPE_SECRET_KEY: ${ST_STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${ST_STRIPE_WEBHOOK_SECRET}
+      STRIPE_PRICE_ID_PRO: ${ST_STRIPE_PRICE_ID_PRO}
+      KOINONIA_CLIENT_SECRET: ${KOINONIA_CLIENT_SECRET}
+    ports:
+      - "8002:8000"
+    depends_on:
+      st-db:
+        condition: service_healthy
+    networks:
+      - koinonia-net
+
+networks:
+  koinonia-net:
+    driver: bridge
+
+volumes:
+  st_db_data:
+  redis_data:
