@@ -41,9 +41,10 @@ secrets:
 	set -a; . ./$(ENV_FILE); set +a; \
 	create_secret() { \
 		name=$$1; value=$$2; \
-		if [ -z "$$value" ]; then echo "  (pulando $$name - vazio no $(ENV_FILE))"; return; fi; \
 		docker secret rm $$name >/dev/null 2>&1 || true; \
-		printf '%s' "$$value" | docker secret create $$name - >/dev/null && echo "  OK $$name"; \
+		printf '%s' "$$value" | docker secret create $$name - >/dev/null && { \
+			if [ -z "$$value" ]; then echo "  OK $$name (vazio)"; else echo "  OK $$name"; fi; \
+		}; \
 	}; \
 	echo "Criando Docker secrets a partir de $(ENV_FILE)..."; \
 	create_secret koinonia_secret_key "$$KOINONIA_SECRET_KEY"; \
@@ -79,9 +80,10 @@ secrets-test:
 	set -a; . ./$(TEST_ENV_FILE); set +a; \
 	create_secret() { \
 		name=$$1; value=$$2; \
-		if [ -z "$$value" ]; then echo "  (pulando $$name - vazio no $(TEST_ENV_FILE))"; return; fi; \
 		docker secret rm $$name >/dev/null 2>&1 || true; \
-		printf '%s' "$$value" | docker secret create $$name - >/dev/null && echo "  OK $$name"; \
+		printf '%s' "$$value" | docker secret create $$name - >/dev/null && { \
+			if [ -z "$$value" ]; then echo "  OK $$name (vazio)"; else echo "  OK $$name"; fi; \
+		}; \
 	}; \
 	echo "Criando Docker secrets de teste a partir de $(TEST_ENV_FILE)..."; \
 	create_secret test_koinonia_secret_key "$$KOINONIA_SECRET_KEY"; \
