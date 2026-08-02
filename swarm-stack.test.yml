@@ -66,6 +66,7 @@ services:
       DB_USER: ${KOINONIA_DB_USER:-postgres}
       DB_HOST: koinonia-db
       DB_PORT: 5432
+      DB_SSLMODE: disable
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5190,http://localhost:5174}
       FRONTEND_URL: ${KOINONIA_FRONTEND_URL:-http://localhost:5190}
       GOOGLE_CLIENT_ID: ${KOINONIA_GOOGLE_CLIENT_ID}
@@ -105,6 +106,7 @@ services:
       DB_USER: ${KOINONIA_DB_USER:-postgres}
       DB_HOST: koinonia-db
       DB_PORT: 5432
+      DB_SSLMODE: disable
       REDIS_URL: redis://redis:6379/0
     secrets:
       - source: koinonia_secret_key

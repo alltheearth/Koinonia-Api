@@ -72,7 +72,9 @@ DATABASES = {
         'HOST': config('DB_HOST'),
         'PORT': config('DB_PORT', default='5432'),
         'CONN_MAX_AGE': 600,
-        'OPTIONS': {'sslmode': 'require'},
+        # Supabase exige SSL; um Postgres local (ex.: stack de teste) não
+        # tem certificado configurado, então isso precisa ser ajustável.
+        'OPTIONS': {'sslmode': config('DB_SSLMODE', default='require')},
         # Supabase roda o pooler (porta 6543) em modo transaction (pgbouncer);
         # cursors nomeados não sobrevivem entre transações nesse modo.
         'DISABLE_SERVER_SIDE_CURSORS': True,
