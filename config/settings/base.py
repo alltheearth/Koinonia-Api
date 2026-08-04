@@ -185,4 +185,11 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'apps.scheduled_messages.tasks.dispatch_due_scheduled_messages',
         'schedule': crontab(minute='*/1'),
     },
+    'sync-incoming-whatsapp-messages': {
+        'task': 'apps.whatsapp.tasks.sync_all_contacts_messages',
+        # A cada 2min (não 1min como o dispatch acima) porque esta task
+        # varre TODO contato de TODO usuário — um /message/find por
+        # contato a cada ciclo — em vez de só os agendamentos vencidos.
+        'schedule': crontab(minute='*/2'),
+    },
 }

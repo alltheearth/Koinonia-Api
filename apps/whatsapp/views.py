@@ -1,5 +1,4 @@
 import base64
-from datetime import datetime, timezone as dt_timezone
 
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -8,28 +7,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.contacts.models import Contact
-from apps.integrations import services as integrations_services
 from apps.integrations.models import UserIntegration
 
 from . import services
 from .models import Message
 from .serializers import MessageSerializer
-
-MEDIA_TYPES = {'AudioMessage', 'ImageMessage', 'VideoMessage', 'DocumentMessage', 'StickerMessage'}
-
-MESSAGE_TYPE_LABELS = {
-    'AudioMessage': '🎤 Mensagem de voz',
-    'ImageMessage': '📷 Imagem',
-    'VideoMessage': '🎥 Vídeo',
-    'DocumentMessage': '📄 Documento',
-    'StickerMessage': '😀 Figurinha',
-    'LocationMessage': '📍 Localização',
-    'ContactMessage': '👤 Contato',
-}
-
-
-def _placeholder_for_type(message_type):
-    return MESSAGE_TYPE_LABELS.get(message_type, '📎 Mensagem sem texto')
+from .services import _placeholder_for_type
 
 
 class ContactMessagesView(APIView):
@@ -58,68 +41,14 @@ class ContactMessagesView(APIView):
             offset = 0
 
         try:
-            data = services.find_messages(
-                integration.uazapi_base_url, integration.uazapi_token, contact.telefone, limit, offset
+            services.sync_contact_messages(
+                contact, integration, mark_read=True, limit=limit, offset=offset
             )
         except Exception:
             return Response(
                 {'detail': 'Não foi possível buscar o histórico no uazapi.'},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-
-        for raw in data.get('messages', []):
-            external_id = raw.get('messageid') or raw.get('id') or ''
-            if not external_id:
-                continue
-            message_type = raw.get('messageType') or ''
-            media = raw.get('content') if isinstance(raw.get('content'), dict) else {}
-            file_name = media.get('fileName') or media.get('title') or ''
-            content = raw.get('text') or _placeholder_for_type(message_type)
-            raw_ts = raw.get('messageTimestamp')
-            enviado_em = (
-                datetime.fromtimestamp(raw_ts / 1000, tz=dt_timezone.utc) if raw_ts else None
-            )
-            message, created = Message.objects.get_or_create(
-                contact=contact,
-                external_id=external_id,
-                defaults={
-                    'direction': Message.Direction.OUT if raw.get('fromMe') else Message.Direction.IN,
-                    'content': content,
-                    'message_type': message_type,
-                    'file_name': file_name,
-                    'enviado_em': enviado_em,
-                },
-            )
-            if not created and not message.content and content:
-                message.content = content
-                message.save(update_fields=['content'])
-            if not created and not message.message_type and message_type:
-                message.message_type = message_type
-                message.save(update_fields=['message_type'])
-            if not created and message.enviado_em is None and enviado_em:
-                message.enviado_em = enviado_em
-                message.save(update_fields=['enviado_em'])
-
-            if message.message_type in MEDIA_TYPES and not message.media_url and not message.audio_file:
-                try:
-                    resolved = services.download_media(
-                        integration.uazapi_base_url, integration.uazapi_token, external_id
-                    )
-                    file_url = resolved.get('fileURL')
-                    if file_url:
-                        message.media_url = file_url
-                        message.save(update_fields=['media_url'])
-                except Exception:
-                    pass
-
-        if not contact.wa_name:
-            try:
-                details = integrations_services.get_chat_details(
-                    integration.uazapi_base_url, integration.uazapi_token, contact.telefone
-                )
-                Contact.objects.filter(id=contact.id).update(**details)
-            except Exception:
-                pass
 
         messages = Message.objects.filter(contact=contact)
         return Response(MessageSerializer(messages, many=True, context={'request': request}).data)

@@ -1,13 +1,22 @@
+import logging
+
+import httpx
+from django.core.signing import BadSignature, SignatureExpired, TimestampSigner
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.integrations import services as integrations_services
 from apps.integrations.models import UserIntegration
 
 from .models import Contact
 from .serializers import ContactSerializer
+
+logger = logging.getLogger(__name__)
 
 
 def _phone_from_jid(jid: str):
@@ -112,3 +121,80 @@ class ContactViewSet(viewsets.ModelViewSet):
 
         Contact.objects.bulk_create(to_create)
         return Response({'created': len(to_create)}, status=status.HTTP_201_CREATED)
+
+
+class ContactAvatarProxyView(APIView):
+    """
+    GET /api/v1/contacts/avatar/?token=...
+
+    Busca a foto de perfil no CDN da WhatsApp do lado do servidor e repassa
+    os bytes — o link salvo em Contact.avatar_url é um link assinado do
+    pps.whatsapp.net que retorna 403 quando um navegador tenta buscar
+    direto (proteção contra hotlink); ver ContactSerializer.get_avatar_url,
+    que é quem gera a URL assinada consumida aqui.
+
+    `AllowAny` porque um <img src> não manda Authorization: o próprio
+    token (assinado, ~10min de validade, restrito a um contato) já é a
+    credencial.
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        signer = TimestampSigner(salt='contact_avatar')
+        raw_token = request.query_params.get('token', '')
+        try:
+            contact_id = signer.unsign(raw_token, max_age=600)
+        except (BadSignature, SignatureExpired):
+            return Response({'detail': 'Token inválido ou expirado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            contact = Contact.objects.select_related('owner__integration').get(pk=contact_id)
+        except (Contact.DoesNotExist, ValueError):
+            return Response({'detail': 'Não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+        avatar_raw = contact.avatar_url
+        if not avatar_raw:
+            return Response({'detail': 'Sem foto de perfil.'}, status=status.HTTP_404_NOT_FOUND)
+
+        image_bytes, content_type = self._fetch_image(avatar_raw)
+        if image_bytes is None:
+            # Link do CDN pode ter expirado — tenta renovar uma vez via
+            # /chat/details (mesma chamada usada no populate preguiçoso
+            # original) antes de desistir.
+            avatar_raw = self._refresh_avatar_url(contact)
+            if avatar_raw:
+                image_bytes, content_type = self._fetch_image(avatar_raw)
+
+        if image_bytes is None:
+            return Response({'detail': 'Não foi possível obter a imagem.'}, status=status.HTTP_502_BAD_GATEWAY)
+
+        response = HttpResponse(image_bytes, content_type=content_type)
+        response['Cache-Control'] = 'public, max-age=300'
+        return response
+
+    @staticmethod
+    def _fetch_image(url):
+        try:
+            res = httpx.get(url, timeout=10.0)
+            res.raise_for_status()
+        except Exception as exc:
+            logger.warning('[contacts.avatar] Falha ao buscar imagem: %s', exc)
+            return None, None
+        return res.content, res.headers.get('content-type', 'image/jpeg')
+
+    @staticmethod
+    def _refresh_avatar_url(contact):
+        try:
+            integration = contact.owner.integration
+        except UserIntegration.DoesNotExist:
+            return ''
+        if not integration.uazapi_configured:
+            return ''
+        try:
+            details = integrations_services.get_chat_details(
+                integration.uazapi_base_url, integration.uazapi_token, contact.telefone
+            )
+        except Exception:
+            return ''
+        Contact.objects.filter(id=contact.id).update(**details)
+        return details.get('avatar_url') or ''
