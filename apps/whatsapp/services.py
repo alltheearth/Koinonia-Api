@@ -1,5 +1,10 @@
-import httpx
+from datetime import datetime, timezone as dt_timezone
 
+import httpx
+from django.db.models import F
+from django.utils import timezone
+
+from apps.integrations import services as integrations_services
 from apps.integrations.services import normalize_phone
 
 
@@ -47,6 +52,139 @@ def send_audio(base_url: str, token: str, phone: str, file_data_uri: str) -> dic
     )
     res.raise_for_status()
     return res.json()
+
+
+MEDIA_TYPES = {'AudioMessage', 'ImageMessage', 'VideoMessage', 'DocumentMessage', 'StickerMessage'}
+
+MESSAGE_TYPE_LABELS = {
+    'AudioMessage': '🎤 Mensagem de voz',
+    'ImageMessage': '📷 Imagem',
+    'VideoMessage': '🎥 Vídeo',
+    'DocumentMessage': '📄 Documento',
+    'StickerMessage': '😀 Figurinha',
+    'LocationMessage': '📍 Localização',
+    'ContactMessage': '👤 Contato',
+}
+
+
+def _placeholder_for_type(message_type):
+    return MESSAGE_TYPE_LABELS.get(message_type, '📎 Mensagem sem texto')
+
+
+def sync_contact_messages(contact, integration, *, mark_read=False, limit: int = 50, offset: int = 0) -> int:
+    """
+    Sincroniza o histórico de mensagens de um contato a partir do uazapi
+    (/message/find) e grava as novas no banco local — mesma lógica de
+    dedupe por external_id que antes vivia inline em
+    ContactMessagesView.get. Diferente do código original, também mantém
+    Contact.ultima_mensagem/ultima_mensagem_em/nao_lidas em dia: antes
+    esses campos só eram tocados quando o próprio usuário do app enviava
+    uma mensagem (ContactMessagesView.post), nunca para mensagens
+    recebidas — por isso o badge de não-lidas nunca saía de 0 e a prévia
+    da última mensagem ficava presa na última enviada.
+
+    mark_read=True — humano está com a conversa aberta agora
+    (ContactMessagesView.get): zera nao_lidas.
+    mark_read=False — sync em segundo plano (sync_all_contacts_messages,
+    apps/whatsapp/tasks.py), ninguém olhando esse contato agora: soma ao
+    nao_lidas existente em vez de zerar.
+
+    Retorna quantas mensagens recebidas (IN) novas entraram nesta chamada.
+    """
+    from apps.contacts.models import Contact
+
+    from .models import Message
+
+    # Propositalmente não engole a exceção aqui — quem chama decide o que
+    # fazer com uma falha do uazapi: ContactMessagesView.get retorna 502
+    # pro usuário (comportamento original preservado), enquanto
+    # sync_all_contacts_messages (tasks.py) isola por contato pra uma
+    # falha não derrubar o lote inteiro.
+    data = find_messages(integration.uazapi_base_url, integration.uazapi_token, contact.telefone, limit, offset)
+
+    newest_incoming_content = None
+    newest_incoming_at = None
+    new_incoming_count = 0
+
+    for raw in data.get('messages', []):
+        external_id = raw.get('messageid') or raw.get('id') or ''
+        if not external_id:
+            continue
+        message_type = raw.get('messageType') or ''
+        media = raw.get('content') if isinstance(raw.get('content'), dict) else {}
+        file_name = media.get('fileName') or media.get('title') or ''
+        content = raw.get('text') or _placeholder_for_type(message_type)
+        raw_ts = raw.get('messageTimestamp')
+        enviado_em = datetime.fromtimestamp(raw_ts / 1000, tz=dt_timezone.utc) if raw_ts else None
+        from_me = bool(raw.get('fromMe'))
+
+        message, created = Message.objects.get_or_create(
+            contact=contact,
+            external_id=external_id,
+            defaults={
+                'direction': Message.Direction.OUT if from_me else Message.Direction.IN,
+                'content': content,
+                'message_type': message_type,
+                'file_name': file_name,
+                'enviado_em': enviado_em,
+            },
+        )
+        if not created and not message.content and content:
+            message.content = content
+            message.save(update_fields=['content'])
+        if not created and not message.message_type and message_type:
+            message.message_type = message_type
+            message.save(update_fields=['message_type'])
+        if not created and message.enviado_em is None and enviado_em:
+            message.enviado_em = enviado_em
+            message.save(update_fields=['enviado_em'])
+
+        if message.message_type in MEDIA_TYPES and not message.media_url and not message.audio_file:
+            try:
+                resolved = download_media(integration.uazapi_base_url, integration.uazapi_token, external_id)
+                file_url = resolved.get('fileURL')
+                if file_url:
+                    message.media_url = file_url
+                    message.save(update_fields=['media_url'])
+            except Exception:
+                pass
+
+        if created and not from_me:
+            new_incoming_count += 1
+            if newest_incoming_at is None or (enviado_em and enviado_em > newest_incoming_at):
+                newest_incoming_at = enviado_em
+                newest_incoming_content = content
+
+    if not contact.wa_name:
+        try:
+            details = integrations_services.get_chat_details(
+                integration.uazapi_base_url, integration.uazapi_token, contact.telefone
+            )
+            Contact.objects.filter(id=contact.id).update(**details)
+        except Exception:
+            pass
+
+    update_fields = []
+    if newest_incoming_content is not None and (
+        contact.ultima_mensagem_em is None
+        or (newest_incoming_at and newest_incoming_at > contact.ultima_mensagem_em)
+    ):
+        contact.ultima_mensagem = newest_incoming_content
+        contact.ultima_mensagem_em = newest_incoming_at or timezone.now()
+        update_fields += ['ultima_mensagem', 'ultima_mensagem_em']
+
+    if mark_read:
+        if contact.nao_lidas:
+            contact.nao_lidas = 0
+            update_fields.append('nao_lidas')
+    elif new_incoming_count:
+        Contact.objects.filter(id=contact.id).update(nao_lidas=F('nao_lidas') + new_incoming_count)
+
+    if update_fields:
+        update_fields.append('atualizado_em')
+        contact.save(update_fields=update_fields)
+
+    return new_incoming_count
 
 
 def _media_type_for(mime_type: str) -> str:
