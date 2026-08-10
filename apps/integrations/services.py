@@ -49,6 +49,30 @@ def list_address_book(base_url: str, token: str) -> list:
     return contacts
 
 
+def list_groups(base_url: str, token: str, force: bool = False, no_participants: bool = True) -> list:
+    """Grupos do WhatsApp em que a instância conectada participa."""
+    res = httpx.get(
+        f'{base_url}/group/list',
+        params={'force': force, 'noparticipants': no_participants},
+        headers={'token': token},
+        timeout=20.0,
+    )
+    res.raise_for_status()
+    data = res.json()
+    return data.get('groups', data) if isinstance(data, dict) else data
+
+
+def get_group_info(base_url: str, token: str, group_jid: str, get_invite_link: bool = False) -> dict:
+    res = httpx.post(
+        f'{base_url}/group/info',
+        json={'groupjid': group_jid, 'getInviteLink': get_invite_link},
+        headers={'token': token},
+        timeout=15.0,
+    )
+    res.raise_for_status()
+    return res.json()
+
+
 def _parse_common_groups(raw: str) -> list:
     if not raw:
         return []
