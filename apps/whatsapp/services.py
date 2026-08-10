@@ -8,8 +8,7 @@ from apps.integrations import services as integrations_services
 from apps.integrations.services import normalize_phone
 
 
-def find_messages(base_url: str, token: str, phone: str, limit: int = 50, offset: int = 0) -> dict:
-    chatid = f'{normalize_phone(phone)}@s.whatsapp.net'
+def _find_messages_by_chatid(base_url: str, token: str, chatid: str, limit: int = 50, offset: int = 0) -> dict:
     res = httpx.post(
         f'{base_url}/message/find',
         json={'chatid': chatid, 'limit': limit, 'offset': offset},
@@ -20,10 +19,32 @@ def find_messages(base_url: str, token: str, phone: str, limit: int = 50, offset
     return res.json()
 
 
+def find_messages(base_url: str, token: str, phone: str, limit: int = 50, offset: int = 0) -> dict:
+    chatid = f'{normalize_phone(phone)}@s.whatsapp.net'
+    return _find_messages_by_chatid(base_url, token, chatid, limit, offset)
+
+
+def find_group_messages(base_url: str, token: str, group_jid: str, limit: int = 50, offset: int = 0) -> dict:
+    return _find_messages_by_chatid(base_url, token, group_jid, limit, offset)
+
+
 def send_text(base_url: str, token: str, phone: str, text: str) -> dict:
     res = httpx.post(
         f'{base_url}/send/text',
         json={'number': normalize_phone(phone), 'text': text},
+        headers={'token': token},
+        timeout=10.0,
+    )
+    res.raise_for_status()
+    return res.json()
+
+
+def send_group_text(base_url: str, token: str, group_jid: str, text: str) -> dict:
+    """Como send_text, mas manda o JID do grupo (@g.us) direto — normalize_phone
+    destruiria o sufixo, que não é dígito."""
+    res = httpx.post(
+        f'{base_url}/send/text',
+        json={'number': group_jid, 'text': text},
         headers={'token': token},
         timeout=10.0,
     )
@@ -71,36 +92,32 @@ def _placeholder_for_type(message_type):
     return MESSAGE_TYPE_LABELS.get(message_type, '📎 Mensagem sem texto')
 
 
-def sync_contact_messages(contact, integration, *, mark_read=False, limit: int = 50, offset: int = 0) -> int:
+def _sync_thread_messages(
+    chatid, integration, *, message_lookup, target, target_model, mark_read, limit, offset
+) -> int:
     """
-    Sincroniza o histórico de mensagens de um contato a partir do uazapi
-    (/message/find) e grava as novas no banco local — mesma lógica de
-    dedupe por external_id que antes vivia inline em
-    ContactMessagesView.get. Diferente do código original, também mantém
-    Contact.ultima_mensagem/ultima_mensagem_em/nao_lidas em dia: antes
-    esses campos só eram tocados quando o próprio usuário do app enviava
-    uma mensagem (ContactMessagesView.post), nunca para mensagens
-    recebidas — por isso o badge de não-lidas nunca saía de 0 e a prévia
-    da última mensagem ficava presa na última enviada.
+    Sincroniza o histórico de mensagens de uma thread (contato OU grupo) a
+    partir do uazapi (/message/find) e grava as novas no banco local —
+    mesma lógica de dedupe por external_id, independente de quem é o dono
+    da thread. `target` é uma instância de Contact ou WhatsAppGroup — os
+    dois têm os mesmos campos de estado (ultima_mensagem/
+    ultima_mensagem_em/nao_lidas), o que permite essa função ser genérica.
+    `message_lookup` é {'contact': target} ou {'group': target}, usado como
+    parte da chave de dedupe do Message (junto com external_id).
 
-    mark_read=True — humano está com a conversa aberta agora
-    (ContactMessagesView.get): zera nao_lidas.
-    mark_read=False — sync em segundo plano (sync_all_contacts_messages,
-    apps/whatsapp/tasks.py), ninguém olhando esse contato agora: soma ao
-    nao_lidas existente em vez de zerar.
+    mark_read=True — humano está com a conversa aberta agora: zera
+    nao_lidas.
+    mark_read=False — sync em segundo plano (tasks.py), ninguém olhando
+    essa thread agora: soma ao nao_lidas existente em vez de zerar.
 
     Retorna quantas mensagens recebidas (IN) novas entraram nesta chamada.
     """
-    from apps.contacts.models import Contact
-
     from .models import Message
 
     # Propositalmente não engole a exceção aqui — quem chama decide o que
-    # fazer com uma falha do uazapi: ContactMessagesView.get retorna 502
-    # pro usuário (comportamento original preservado), enquanto
-    # sync_all_contacts_messages (tasks.py) isola por contato pra uma
-    # falha não derrubar o lote inteiro.
-    data = find_messages(integration.uazapi_base_url, integration.uazapi_token, contact.telefone, limit, offset)
+    # fazer com uma falha do uazapi (retornar 502 pro usuário vs isolar
+    # por thread num sync em lote, ver tasks.py).
+    data = _find_messages_by_chatid(integration.uazapi_base_url, integration.uazapi_token, chatid, limit, offset)
 
     newest_incoming_content = None
     newest_incoming_at = None
@@ -119,7 +136,6 @@ def sync_contact_messages(contact, integration, *, mark_read=False, limit: int =
         from_me = bool(raw.get('fromMe'))
 
         message, created = Message.objects.get_or_create(
-            contact=contact,
             external_id=external_id,
             defaults={
                 'direction': Message.Direction.OUT if from_me else Message.Direction.IN,
@@ -128,6 +144,7 @@ def sync_contact_messages(contact, integration, *, mark_read=False, limit: int =
                 'file_name': file_name,
                 'enviado_em': enviado_em,
             },
+            **message_lookup,
         )
         if not created and not message.content and content:
             message.content = content
@@ -155,6 +172,48 @@ def sync_contact_messages(contact, integration, *, mark_read=False, limit: int =
                 newest_incoming_at = enviado_em
                 newest_incoming_content = content
 
+    update_fields = []
+    if newest_incoming_content is not None and (
+        target.ultima_mensagem_em is None
+        or (newest_incoming_at and newest_incoming_at > target.ultima_mensagem_em)
+    ):
+        target.ultima_mensagem = newest_incoming_content
+        target.ultima_mensagem_em = newest_incoming_at or timezone.now()
+        update_fields += ['ultima_mensagem', 'ultima_mensagem_em']
+
+    if mark_read:
+        if target.nao_lidas:
+            target.nao_lidas = 0
+            update_fields.append('nao_lidas')
+    elif new_incoming_count:
+        target_model.objects.filter(id=target.id).update(nao_lidas=F('nao_lidas') + new_incoming_count)
+
+    if update_fields:
+        update_fields.append('atualizado_em')
+        target.save(update_fields=update_fields)
+
+    return new_incoming_count
+
+
+def sync_contact_messages(contact, integration, *, mark_read=False, limit: int = 50, offset: int = 0) -> int:
+    """Wrapper de _sync_thread_messages pra Contact — ver docstring lá pra
+    detalhes do comportamento de mark_read/nao_lidas. Além do sync de
+    mensagens, também preenche wa_name/avatar_url/grupos_comuns na primeira
+    vez que vê esse contato (populate preguiçoso via /chat/details)."""
+    from apps.contacts.models import Contact
+
+    chatid = f'{normalize_phone(contact.telefone)}@s.whatsapp.net'
+    new_incoming_count = _sync_thread_messages(
+        chatid,
+        integration,
+        message_lookup={'contact': contact},
+        target=contact,
+        target_model=Contact,
+        mark_read=mark_read,
+        limit=limit,
+        offset=offset,
+    )
+
     if not contact.wa_name:
         try:
             details = integrations_services.get_chat_details(
@@ -164,27 +223,25 @@ def sync_contact_messages(contact, integration, *, mark_read=False, limit: int =
         except Exception:
             pass
 
-    update_fields = []
-    if newest_incoming_content is not None and (
-        contact.ultima_mensagem_em is None
-        or (newest_incoming_at and newest_incoming_at > contact.ultima_mensagem_em)
-    ):
-        contact.ultima_mensagem = newest_incoming_content
-        contact.ultima_mensagem_em = newest_incoming_at or timezone.now()
-        update_fields += ['ultima_mensagem', 'ultima_mensagem_em']
-
-    if mark_read:
-        if contact.nao_lidas:
-            contact.nao_lidas = 0
-            update_fields.append('nao_lidas')
-    elif new_incoming_count:
-        Contact.objects.filter(id=contact.id).update(nao_lidas=F('nao_lidas') + new_incoming_count)
-
-    if update_fields:
-        update_fields.append('atualizado_em')
-        contact.save(update_fields=update_fields)
-
     return new_incoming_count
+
+
+def sync_group_messages(group, integration, *, mark_read=False, limit: int = 50, offset: int = 0) -> int:
+    """Wrapper de _sync_thread_messages pra WhatsAppGroup — nome/avatar do
+    grupo já vêm preenchidos por GroupSendView, não precisa de populate
+    preguiçoso como em sync_contact_messages."""
+    from .models import WhatsAppGroup
+
+    return _sync_thread_messages(
+        group.jid,
+        integration,
+        message_lookup={'group': group},
+        target=group,
+        target_model=WhatsAppGroup,
+        mark_read=mark_read,
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _media_type_for(mime_type: str) -> str:
