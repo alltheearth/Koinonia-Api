@@ -80,6 +80,25 @@ services:
     networks:
       - koinonia-net
 
+  koinonia-celery-beat:
+    build: .
+    command: celery -A config beat -l info
+    environment:
+      DEBUG: "True"
+      SECRET_KEY: ${KOINONIA_SECRET_KEY}
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DB_NAME: ${KOINONIA_DB_NAME}
+      DB_USER: ${KOINONIA_DB_USER}
+      DB_PASSWORD: ${KOINONIA_DB_PASSWORD}
+      DB_HOST: ${KOINONIA_DB_HOST}
+      DB_PORT: ${KOINONIA_DB_PORT:-5432}
+      FERNET_KEY: ${KOINONIA_FERNET_KEY}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - koinonia-net
+
   shepherds-toolkit-api:
     build: ../shepherds-toolkit-api
     environment:
