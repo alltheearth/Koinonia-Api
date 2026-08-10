@@ -91,6 +91,35 @@ class WhatsAppConnectView(APIView):
         return Response({'qr_code': qr_code, 'status': 'connecting'})
 
 
+class WhatsAppGroupsView(APIView):
+    def get(self, request):
+        integration, _ = UserIntegration.objects.get_or_create(user=request.user)
+        if not integration.uazapi_configured:
+            return Response(
+                {'detail': 'Configure suas credenciais uazapi em Integrações.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        force = request.query_params.get('force', '').lower() == 'true'
+        try:
+            groups = services.list_groups(integration.uazapi_base_url, integration.uazapi_token, force=force)
+        except Exception:
+            return Response(
+                {'detail': 'Não foi possível buscar os grupos no uazapi.'},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response([
+            {
+                'jid': g.get('JID') or g.get('jid') or '',
+                'nome': g.get('Name') or g.get('name') or '',
+                'avatar_url': g.get('groupPicture') or g.get('picture') or '',
+                'participantes': g.get('ParticipantsCount') or len(g.get('Participants') or []),
+            }
+            for g in groups
+        ])
+
+
 class GoogleStatusView(APIView):
     def get(self, request):
         integration, _ = UserIntegration.objects.get_or_create(user=request.user)

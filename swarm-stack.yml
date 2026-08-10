@@ -100,6 +100,32 @@ services:
       restart_policy:
         condition: any
 
+  koinonia-celery-beat:
+    image: koinonia-api:${TAG:-latest}
+    command: ["celery", "-A", "config", "beat", "-l", "info"]
+    environment:
+      DEBUG: "False"
+      ALLOWED_HOSTS: ${KOINONIA_ALLOWED_HOSTS}
+      DB_NAME: ${KOINONIA_DB_NAME}
+      DB_USER: ${KOINONIA_DB_USER}
+      DB_HOST: ${KOINONIA_DB_HOST}
+      DB_PORT: ${KOINONIA_DB_PORT:-5432}
+      REDIS_URL: redis://redis:6379/0
+    secrets:
+      - source: koinonia_secret_key
+        target: secret_key
+      - source: koinonia_db_password
+        target: db_password
+      - source: koinonia_fernet_key
+        target: fernet_key
+    depends_on:
+      - redis
+    networks:
+      - koinonia-net
+    deploy:
+      restart_policy:
+        condition: any
+
   shepherds-toolkit-api:
     image: shepherds-toolkit-api:${TAG:-latest}
     command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2"]

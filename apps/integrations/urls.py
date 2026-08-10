@@ -13,6 +13,7 @@ from .views import (
     ShepherdsToolkitWritingsView,
     UserIntegrationView,
     WhatsAppConnectView,
+    WhatsAppGroupsView,
     WhatsAppStatusView,
 )
 
@@ -20,6 +21,7 @@ urlpatterns = [
     path('', UserIntegrationView.as_view(), name='integrations'),
     path('whatsapp/status/', WhatsAppStatusView.as_view(), name='whatsapp-status'),
     path('whatsapp/connect/', WhatsAppConnectView.as_view(), name='whatsapp-connect'),
+    path('whatsapp/groups/', WhatsAppGroupsView.as_view(), name='whatsapp-groups'),
     path('google/status/', GoogleStatusView.as_view(), name='google-status'),
     path('google/connect/', GoogleConnectView.as_view(), name='google-connect'),
     path('google/disconnect/', GoogleDisconnectView.as_view(), name='google-disconnect'),
