@@ -6,6 +6,7 @@ from apps.contacts.models import Contact
 from apps.integrations.models import UserIntegration
 
 from . import services
+from .models import WhatsAppGroup
 
 logger = logging.getLogger(__name__)
 
@@ -42,3 +43,26 @@ def sync_all_contacts_messages():
                 )
 
     return {'synced_contacts': synced_contacts, 'new_messages': new_messages}
+
+
+@shared_task
+def sync_all_groups_messages():
+    """Mesma lógica de sync_all_contacts_messages, mas pra grupos rastreados
+    (WhatsAppGroup — só existem depois que o usuário manda a primeira
+    mensagem via GroupSendView, ver apps/whatsapp/views.py)."""
+    synced_groups = 0
+    new_messages = 0
+
+    for integration in UserIntegration.objects.select_related('user').iterator():
+        if not integration.uazapi_configured:
+            continue
+
+        groups = WhatsAppGroup.objects.filter(owner_id=integration.user_id)
+        for group in groups.iterator():
+            try:
+                new_messages += services.sync_group_messages(group, integration, mark_read=False)
+                synced_groups += 1
+            except Exception:
+                logger.exception('[sync_all_groups_messages] Falha ao sincronizar grupo %s', group.id)
+
+    return {'synced_groups': synced_groups, 'new_messages': new_messages}

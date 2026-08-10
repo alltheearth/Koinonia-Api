@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import Message
+from .models import Message, WhatsAppGroup
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -20,3 +20,13 @@ class MessageSerializer(serializers.ModelSerializer):
             url = obj.audio_file.url
             return request.build_absolute_uri(url) if request else url
         return obj.media_url or None
+
+
+class WhatsAppGroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = WhatsAppGroup
+        fields = [
+            'id', 'jid', 'nome', 'avatar_url', 'participantes',
+            'ultima_mensagem', 'ultima_mensagem_em', 'nao_lidas',
+        ]
+        read_only_fields = fields

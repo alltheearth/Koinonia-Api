@@ -192,4 +192,8 @@ CELERY_BEAT_SCHEDULE = {
         # contato a cada ciclo — em vez de só os agendamentos vencidos.
         'schedule': crontab(minute='*/2'),
     },
+    'sync-incoming-whatsapp-group-messages': {
+        'task': 'apps.whatsapp.tasks.sync_all_groups_messages',
+        'schedule': crontab(minute='*/2'),
+    },
 }
