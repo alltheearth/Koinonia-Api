@@ -212,8 +212,11 @@ class GroupSendView(APIView):
 
         group, _created = WhatsAppGroup.objects.get_or_create(owner=request.user, jid=jid)
         metadata_fields = []
-        for body_key, model_field in (('nome', 'nome'), ('avatarUrl', 'avatar_url'), ('participantes', 'participantes')):
-            value = request.data.get(body_key)
+        # CamelCaseJSONParser (ver config/settings/base.py) já converte o
+        # corpo recebido pra snake_case antes de chegar em request.data —
+        # não usar as chaves camelCase que o frontend manda (avatarUrl).
+        for model_field in ('nome', 'avatar_url', 'participantes'):
+            value = request.data.get(model_field)
             if value not in (None, ''):
                 setattr(group, model_field, value)
                 metadata_fields.append(model_field)

@@ -109,12 +109,24 @@ class WhatsAppGroupsView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        # Nomes de campo do uazapi pra /group/list não são documentados de
+        # forma confiável — cobre variações mais prováveis (baseado no que
+        # já funciona em /chat/details e /contacts/list) até confirmar com
+        # uma resposta real.
         return Response([
             {
-                'jid': g.get('JID') or g.get('jid') or '',
-                'nome': g.get('Name') or g.get('name') or '',
-                'avatar_url': g.get('groupPicture') or g.get('picture') or '',
-                'participantes': g.get('ParticipantsCount') or len(g.get('Participants') or []),
+                'jid': g.get('JID') or g.get('jid') or g.get('id') or g.get('ID') or '',
+                'nome': g.get('Name') or g.get('name') or g.get('subject') or g.get('Subject') or '',
+                'avatar_url': (
+                    g.get('groupPicture') or g.get('picture') or g.get('pictureUrl') or g.get('image') or ''
+                ),
+                'participantes': (
+                    g.get('ParticipantsCount')
+                    or g.get('participantsCount')
+                    or g.get('Size')
+                    or g.get('size')
+                    or len(g.get('Participants') or g.get('participants') or [])
+                ),
             }
             for g in groups
         ])
